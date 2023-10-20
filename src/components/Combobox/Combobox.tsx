@@ -495,7 +495,11 @@ const ComboboxInput = React.forwardRef<
             context.onOpenChange(false);
             inputNode.value = String(context.highlightedOption);
           } {
-            inputNode.value = "";
+            const value = inputNode.value;
+            const valueLength = value?.length;
+            inputNode.selectionStart = valueLength;
+            inputNode.selectionEnd = valueLength;
+            inputNode.value = value;
           }
 
           break;
