@@ -15,9 +15,11 @@ const [CollectionItem, CollectionProvider, useCollection] = createRefCollection<
   ComboboxOptionProps
 >();
 
+type Value = string | Array<string>;
+
 type ComboboxContextType = {
-  value?: string;
-  defaultValue?: string;
+  value?: Value,
+  defaultValue?: Value,
   onValueChange: (value: string) => void;
 
   open: boolean;
@@ -33,7 +35,8 @@ type ComboboxContextType = {
   contentRef: React.RefObject<ComboboxContentElement>;
   inputRef: React.RefObject<HTMLInputElement>;
 
-  setValueToHighlighted: () => void;
+  setCurrentHighlightedToValue: () => void;
+  multiple?: boolean;
 };
 
 const [ComboboxProvider, useComboboxContext] =
@@ -41,12 +44,13 @@ const [ComboboxProvider, useComboboxContext] =
 
 //-- Root
 type ComboboxRootProps = React.PropsWithChildren<{
-  value?: string;
-  defaultValue?: string;
+  value?: Value,
+  defaultValue?: Value,
   open?: boolean;
   defaultOpen?: boolean;
   onOpenChange?: (value: boolean) => void;
-  onChange?: (value: string) => void;
+  onChange?: (value: Value) => void;
+  multiple?: boolean
 }>;
 
 export function ComboboxRoot(props: ComboboxRootProps) {
@@ -58,6 +62,7 @@ export function ComboboxRoot(props: ComboboxRootProps) {
     value: valueProp,
     defaultValue,
     onChange,
+    multiple = false
   } = props;
 
   const triggerRef = React.useRef<HTMLButtonElement>(null);
@@ -72,7 +77,7 @@ export function ComboboxRoot(props: ComboboxRootProps) {
     onChange: onOpenChange,
   });
 
-  const [value, setValue] = useControllableState({
+  const [value, setValue] = useControllableState<Value>({
     prop: valueProp,
     defaultProp: defaultValue,
     onChange,
@@ -81,9 +86,22 @@ export function ComboboxRoot(props: ComboboxRootProps) {
   const [highlightedOption, setHighlightedOption] =
     useControllableState<string>({});
 
+  const onValueChange = React.useCallback((newValue: string | undefined) => {
+    if (!newValue) return;
+
+    if (multiple) {
+      const currentValues = Array.isArray(value) ? value : [];
+      const final = currentValues.includes(newValue) ? currentValues.filter((val) => val != newValue) : [...currentValues, newValue];
+      setValue(final);
+    } else {
+      setValue(newValue);
+    }
+  }, [multiple, setValue, value])
+
   return (
     <ComboboxProvider
       value={{
+        multiple: multiple,
         triggerRef,
         contentRef,
         inputRef,
@@ -96,12 +114,12 @@ export function ComboboxRoot(props: ComboboxRootProps) {
         }, [setOpen]),
         value,
         defaultValue,
-        onValueChange: setValue,
+        onValueChange,
         highlightedOption,
         onHighlightedOptionChange: setHighlightedOption,
-        setValueToHighlighted: React.useCallback(() => {
-          setValue(highlightedOption);
-        }, [highlightedOption, setValue]),
+        setCurrentHighlightedToValue: React.useCallback(() => {
+          onValueChange(highlightedOption)
+        }, [highlightedOption, onValueChange]),
       }}
     >
       <CollectionProvider>
@@ -152,15 +170,18 @@ const ComboboxContent = React.forwardRef<
 
   const getItems = useCollection();
   const open = context.open;
-  const value = context.value;
+  const cValue = context.value;
+  const value = Array.isArray(cValue) ? cValue[0] : cValue;
 
   // Highlighted option logic
   useLayoutWatch(
-    ([oldOpen], [newOpen, newValue]) => {
+    ([oldOpen, oldValue], [newOpen, newValue]) => {
+      // don't update highlight when value changes
+      if (oldValue && oldValue != newValue) return
+
       if (!newOpen) {
         return;
       }
-
       function highlightFirstNonDisabled() {
         const items = getItems();
         const selectedItem = items.find((item) => !item.disabled);
@@ -183,7 +204,7 @@ const ComboboxContent = React.forwardRef<
         highlightFirstNonDisabled();
       }
     },
-    [open, value, props.children]
+    [open, cValue, props.children]
   );
 
   return (
@@ -197,7 +218,8 @@ const ComboboxContent = React.forwardRef<
         const value = context.value;
         if (!inputNode) return;
 
-        if (value) {
+        // TODO : allow user to configure the display value
+        if (!Array.isArray(value) && value) {
           inputNode.value = value;
         } else {
           inputNode.value = "";
@@ -205,6 +227,7 @@ const ComboboxContent = React.forwardRef<
       }, [context])}
     >
       <PopperPrimitive.Content
+        data-open={context.open}
         ref={composedRef}
         {...props}
         asChild
@@ -229,8 +252,8 @@ type ComboboxOptionRenderValues = { selected: boolean; highlighted: boolean };
 type ComboboxOptionProps = Omit<PrimitiveLiProps, "children" | "value"> &
   ComboboxOptionDataProps & {
     children?:
-      | React.ReactNode
-      | ((value: ComboboxOptionRenderValues) => React.ReactNode);
+    | React.ReactNode
+    | ((value: ComboboxOptionRenderValues) => React.ReactNode);
   };
 
 const ComboboxOption = React.forwardRef<
@@ -245,7 +268,15 @@ const ComboboxOption = React.forwardRef<
 
   const highlightedOption = context.highlightedOption;
   const highlighted = highlightedOption == value;
-  const selected = context.value == value;
+  const selected = React.useMemo(() => {
+    const cVal = context.value;
+
+    if (Array.isArray(cVal)) {
+      return cVal.includes(value);
+    } else {
+      return value == cVal;
+    }
+  }, [context.value, value])
   const inputRef = context.inputRef;
 
   /* Auto Scroll into view */
@@ -279,21 +310,25 @@ const ComboboxOption = React.forwardRef<
 
   const onClick = React.useCallback(() => {
     if (disabled) return;
-    if (selected) return;
 
     context.onValueChange(value);
-    context.onOpenChange(false);
     const inputNode = inputRef.current as HTMLInputElement;
     if (!inputNode) return;
 
-    requestAnimationFrame(() => {
-      inputRef?.current?.focus();
-      const valueLength = value?.length;
-      inputNode.selectionStart = valueLength;
-      inputNode.selectionEnd = valueLength;
-      inputNode.value = value;
-    });
-  }, [context, disabled, inputRef, selected, value]);
+    if (!context.multiple) {
+      context.onOpenChange(false);
+      requestAnimationFrame(() => {
+        inputRef?.current?.focus();
+        const valueLength = value?.length;
+        inputNode.selectionStart = valueLength;
+        inputNode.selectionEnd = valueLength;
+        inputNode.value = value;
+      });
+    } {
+      inputRef.current?.focus();
+    }
+
+  }, [context, disabled, inputRef, value]);
 
   return (
     <CollectionItem
@@ -450,13 +485,19 @@ const ComboboxInput = React.forwardRef<
             return;
           }
 
-          context.setValueToHighlighted();
-          context.onOpenChange(false);
           e.preventDefault();
+          context.setCurrentHighlightedToValue();
+
           const inputNode = context.inputRef.current;
           if (!inputNode) return;
 
-          inputNode.value = String(context.highlightedOption);
+          if (!context.multiple) {
+            context.onOpenChange(false);
+            inputNode.value = String(context.highlightedOption);
+          } {
+            inputNode.value = "";
+          }
+
           break;
         }
       }
@@ -479,20 +520,18 @@ const ComboboxInput = React.forwardRef<
   }, [getItems, highlightedOption]);
 
   return (
-    <PopperPrimitive.Anchor asChild>
-      <Primitive.input
-        ref={composedRefs}
-        {...props}
-        onKeyDown={composeEventHandlers(props.onKeyDown, handleKeyDown)}
-        onChange={composeEventHandlers(props.onChange, handleOnChange)}
-        role="combobox"
-        aria-autocomplete="list"
-        aria-controls={context.contentId}
-        aria-expanded={context.open}
-        id={context.inputId}
-        aria-activedescendant={activeDescendantId}
-      />
-    </PopperPrimitive.Anchor>
+    <Primitive.input
+      ref={composedRefs}
+      {...props}
+      onKeyDown={composeEventHandlers(props.onKeyDown, handleKeyDown)}
+      onChange={composeEventHandlers(props.onChange, handleOnChange)}
+      role="combobox"
+      aria-autocomplete="list"
+      aria-controls={context.contentId}
+      aria-expanded={context.open}
+      id={context.inputId}
+      aria-activedescendant={activeDescendantId}
+    />
   );
 });
 
@@ -527,8 +566,11 @@ export function ComboboxPortal({
   );
 }
 
+const ComboboxAnchor = PopperPrimitive.Anchor
+
 export { ComboboxInput };
 export { ComboboxOption };
 export { ComboboxTrigger };
 export { ComboboxLabel };
 export { ComboboxContent };
+export { ComboboxAnchor }
