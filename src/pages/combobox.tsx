@@ -37,13 +37,13 @@ export default function Combobox() {
     query === ""
       ? countryData
       : countryData.filter((country) =>
-          country.toLowerCase().includes(query.toLowerCase())
-        );
+        country.toLowerCase().includes(query.toLowerCase())
+      );
 
   return (
     <div className="mx-auto w-[300px] mt-6">
       <ComboboxRoot
-        onChange={(value) => {
+        onChange={() => {
           setQuery("");
         }}
       >

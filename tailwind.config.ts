@@ -8,6 +8,21 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      keyframes: {
+        slideDownAndFade: {
+          from: { opacity: '0', transform: 'translateY(-10px) scale(0.95)' },
+          to: { opacity: '1', transform: 'translateY(0) scale(1.0)' },
+        },
+        slideUpAndFade: {
+          from: { opacity: '1', transform: 'translateY(0) scale(1.0)' },
+          to: { opacity: '0', transform: 'translateY(-10px) scale(0.95)' },
+        },
+
+      },
+      animation: {
+        slideDownAndFade: 'slideDownAndFade 100ms cubic-bezier(0.16, 1, 0.3, 1)',
+        slideUpAndFade: 'slideUpAndFade 100ms cubic-bezier(0.16, 1, 0.3, 1)',
+      },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
         'gradient-conic':
@@ -16,5 +31,6 @@ const config: Config = {
     },
   },
   plugins: [],
+
 }
 export default config
